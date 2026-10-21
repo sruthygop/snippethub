@@ -1,0 +1,14 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# Secrets
+.env
+
+# Node (for the frontend later)
+node_modules/
+
+# VS Code and Windows
+.vscode/
+.DS_Store
