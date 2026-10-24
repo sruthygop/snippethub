@@ -24,12 +24,20 @@ class Token(BaseModel):
     token_type: str = "bearer"
 
 
+class TagOut(BaseModel):
+    id: int
+    name: str
+
+    model_config = {"from_attributes": True}
+
+
 class SnippetCreate(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     code: str = Field(min_length=1)
     language: str = Field(min_length=1, max_length=50)
     description: Optional[str] = None
     is_public: bool = False
+    tags: list[str] = []
 
 
 class SnippetUpdate(BaseModel):
@@ -38,6 +46,7 @@ class SnippetUpdate(BaseModel):
     language: Optional[str] = Field(default=None, min_length=1, max_length=50)
     description: Optional[str] = None
     is_public: Optional[bool] = None
+    tags: Optional[list[str]] = None
 
 
 class SnippetOut(BaseModel):
@@ -48,6 +57,7 @@ class SnippetOut(BaseModel):
     description: Optional[str]
     is_public: bool
     share_token: UUID
+    tags: list[TagOut]
     created_at: datetime
     updated_at: datetime
 

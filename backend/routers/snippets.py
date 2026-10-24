@@ -1,8 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from database import get_db
-from models import Snippet, User
+from models import Snippet, Tag, User
 from routers.auth import get_current_user
 from schemas import SnippetCreate, SnippetOut, SnippetUpdate
 
@@ -16,13 +19,29 @@ def get_own_snippet(snippet_id: int, user: User, db: Session) -> Snippet:
     return snippet
 
 
+def get_or_create_tags(names: list[str], db: Session) -> list[Tag]:
+    # Clean the names: remove spaces, make lowercase, remove duplicates
+    clean = {n.strip().lower() for n in names if n.strip()}
+    tags = []
+    for name in sorted(clean):
+        if len(name) > 50:
+            raise HTTPException(status_code=400, detail="Tag is too long (max 50)")
+        tag = db.query(Tag).filter(Tag.name == name).first()
+        if not tag:
+            tag = Tag(name=name)
+            db.add(tag)
+        tags.append(tag)
+    return tags
+
+
 @router.post("", response_model=SnippetOut, status_code=201)
 def create_snippet(
     data: SnippetCreate,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    snippet = Snippet(**data.model_dump(), user_id=user.id)
+    snippet = Snippet(**data.model_dump(exclude={"tags"}), user_id=user.id)
+    snippet.tags = get_or_create_tags(data.tags, db)
     db.add(snippet)
     db.commit()
     db.refresh(snippet)
@@ -31,15 +50,29 @@ def create_snippet(
 
 @router.get("", response_model=list[SnippetOut])
 def list_snippets(
+    q: Optional[str] = Query(None, description="Search text"),
+    tag: Optional[str] = Query(None, description="Filter by tag"),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    return (
-        db.query(Snippet)
-        .filter(Snippet.user_id == user.id)
-        .order_by(Snippet.created_at.desc())
-        .all()
-    )
+    query = db.query(Snippet).filter(Snippet.user_id == user.id)
+
+    if tag:
+        query = query.filter(Snippet.tags.any(Tag.name == tag.strip().lower()))
+
+    if q:
+        document = func.to_tsvector(
+            "english",
+            Snippet.title + " " + func.coalesce(Snippet.description, "") + " " + Snippet.code,
+        )
+        query = query.filter(
+            or_(
+                document.op("@@")(func.plainto_tsquery("english", q)),
+                Snippet.title.ilike(f"%{q}%"),
+            )
+        )
+
+    return query.order_by(Snippet.created_at.desc()).all()
 
 
 @router.get("/{snippet_id}", response_model=SnippetOut)
@@ -59,8 +92,14 @@ def update_snippet(
     user: User = Depends(get_current_user),
 ):
     snippet = get_own_snippet(snippet_id, user, db)
-    for field, value in data.model_dump(exclude_unset=True).items():
+    changes = data.model_dump(exclude_unset=True)
+    tag_names = changes.pop("tags", None)
+
+    for field, value in changes.items():
         setattr(snippet, field, value)
+    if tag_names is not None:
+        snippet.tags = get_or_create_tags(tag_names, db)
+    snippet.updated_at = func.now()
     db.commit()
     db.refresh(snippet)
     return snippet

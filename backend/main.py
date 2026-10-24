@@ -3,12 +3,13 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from database import get_db
-from routers import auth, snippets
+from routers import auth, snippets, tags
 
 app = FastAPI()
 
 app.include_router(auth.router)
 app.include_router(snippets.router)
+app.include_router(tags.router)
 
 
 @app.get("/")
